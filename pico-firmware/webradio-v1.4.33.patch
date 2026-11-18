@@ -1,0 +1,341 @@
+diff --git a/src/at_wifi.c b/src/at_wifi.c
+index bed920d..ab7b8c2 100644
+--- a/src/at_wifi.c
++++ b/src/at_wifi.c
+@@ -25,6 +25,7 @@
+ #include <stdbool.h>
+ 
+ #include "sysctrl.h"
++#include "radio.h"
+ 
+ #include "debug.h"
+ #include "mcu_hw.h"
+@@ -40,6 +41,15 @@ static int at_wifi_escape_state = 0;
+ static TickType_t at_wifi_escape_tick = 0;
+ 
+ static QueueHandle_t rx_queue = NULL;
++static SemaphoreHandle_t out_mutex = NULL;    // keeps lines from different tasks apart
++static bool at_echo = true;                   // ate0 / ate1
++static volatile uint32_t at_dropped = 0;      // bytes lost because the queue was full
++static char at_last[4][40];                   // last commands (diagnostics)
++static volatile uint32_t at_count = 0;
++
++uint32_t at_wifi_dropped(void) { return at_dropped; }
++uint32_t at_wifi_commands(void) { return at_count; }
++const char *at_wifi_last_command(int i) { return at_last[i & 3]; }
+ 
+ static uint8_t pet2asc(uint8_t c) {
+     if (c >= 0x41 && c <= 0x5a)
+@@ -67,7 +77,38 @@ static uint8_t asc2pet(uint8_t c) {
+ 
+ static void port_putc(unsigned char byte) {
+   at_wifi_escape_tick = xTaskGetTickCount();  // reset idle counter
++  if(out_mutex) xSemaphoreTake(out_mutex, portMAX_DELAY);
+   sys_port_write(0, &byte, 1);
++  if(out_mutex) xSemaphoreGive(out_mutex);
++}
++
++// unsolicited text (radio status): the core's fifo towards the Amiga is tiny (15 bytes), so
++// longer lines go out piece by piece while the Amiga reads. The output lock is held for the
++// whole line so lines from different tasks do not mix. Gives up after timeout_ms (nobody reading).
++bool at_wifi_puts_wait(const char *str, unsigned int timeout_ms) {
++  if(!out_mutex) return false;
++  const unsigned char *p = (const unsigned char *)str;
++  int len = strlen(str);
++  TickType_t start = xTaskGetTickCount();
++  bool ok = true;
++  xSemaphoreTake(out_mutex, portMAX_DELAY);
++  while(len > 0) {
++    int n = sys_port_write_part(0, p, len);
++    if(n > 0) { p += n; len -= n; continue; }
++    if((xTaskGetTickCount() - start) > pdMS_TO_TICKS(timeout_ms)) { ok = false; break; }
++    vTaskDelay(pdMS_TO_TICKS(1));
++  }
++  xSemaphoreGive(out_mutex);
++  return ok;
++}
++
++// unsolicited text (radio status): never waits for the Amiga to read
++bool at_wifi_puts_nb(const char *str) {
++  if(!out_mutex) return false;
++  xSemaphoreTake(out_mutex, portMAX_DELAY);
++  bool ok = sys_port_write_nb(0, (const unsigned char *)str, strlen(str));
++  xSemaphoreGive(out_mutex);
++  return ok;
+ }
+ 
+ void at_wifi_puts(char *str)
+@@ -86,7 +127,9 @@ void at_wifi_puts(char *str)
+       out = temp;
+   }
+   at_wifi_escape_tick = xTaskGetTickCount();
++  if(out_mutex) xSemaphoreTake(out_mutex, portMAX_DELAY);
+   sys_port_write(0, out, len);
++  if(out_mutex) xSemaphoreGive(out_mutex);
+ }
+ 
+ void at_wifi_puts_n(char *str, int len) {
+@@ -98,6 +141,9 @@ void at_wifi_puts_n(char *str, int len) {
+ }
+ 
+ static void port_line(char *command) {
++  strncpy(at_last[at_count & 3], command, sizeof(at_last[0])-1);
++  at_last[at_count & 3][sizeof(at_last[0])-1] = 0;
++  at_count++;
+   if(strcasecmp(command, "athelp") == 0) {
+     at_wifi_puts("Supported commands:\r\n");
+     at_wifi_puts("  atscan                     - scan for WiFi networks\r\n");
+@@ -153,6 +199,13 @@ static void port_line(char *command) {
+       at_wifi_puts("OK\r\n");
+       at_wifi_state = AT_WIFI_STATE_ONLINE;
+     }
++#ifdef RADIO_ENABLE
++  } else if(strncasecmp(command, "ate", 3) == 0) {
++    at_echo = (command[3] != '0');
++    at_wifi_puts("OK\r\n");
++  } else if(strncasecmp(command, "atr", 3) == 0) {
++    radio_at_command(command + 3);
++#endif
+   } else if(strncasecmp(command, "atpetscii", 9) == 0) {
+       petsc2 = true;
+       at_wifi_puts("petsc-2\r\n");
+@@ -171,7 +224,7 @@ static void port_line(char *command) {
+ void at_wifi_port_byte(unsigned char byte) {
+   // the FPGA may deliver port bytes before at_wifi_init() created the queue
+   if(!rx_queue) return;
+-  xQueueSendToBack(rx_queue, &byte, ( TickType_t ) 10);
++  if(xQueueSendToBack(rx_queue, &byte, ( TickType_t ) 10) != pdTRUE) at_dropped++;
+ }
+ 
+ #define INPUT_BUFFER_SIZE 64
+@@ -241,7 +294,7 @@ static void at_wifi_tx(unsigned char byte) {
+     
+   // echo byte back. Echo everything but newlines. In case
+   // of cr append a newline  
+-  if(byte != '\n') {  
++  if(byte != '\n' && at_echo) {  
+     port_putc(byte);
+     if(byte == '\r') port_putc('\n');
+   }
+@@ -278,7 +331,8 @@ void at_wifi_init(void) {
+ #endif
+ 
+   // start a thread to handle at/wifi io
+-  rx_queue = xQueueCreate(8, sizeof( unsigned char ) );
++  rx_queue = xQueueCreate(512, sizeof( unsigned char ) );   // was 8: bursts of commands were lost
++  out_mutex = xSemaphoreCreateMutex();
+   xTaskCreate(at_wifi_task, (char *)"at_wifi_task", 2048, NULL, configMAX_PRIORITIES-10, NULL);
+ }
+ 
+diff --git a/src/at_wifi.h b/src/at_wifi.h
+index 86f0840..dc69564 100644
+--- a/src/at_wifi.h
++++ b/src/at_wifi.h
+@@ -9,5 +9,10 @@ void at_wifi_init(void);
+ void at_wifi_port_byte(unsigned char);
+ void at_wifi_puts(char *);
+ void at_wifi_puts_n(char *, int);
++bool at_wifi_puts_wait(const char *, unsigned int timeout_ms);   // sends piece by piece, gives up after timeout_ms
++bool at_wifi_puts_nb(const char *);      // never blocks, returns false (text dropped) if the core has no room
++uint32_t at_wifi_dropped(void);           // diagnostics
++uint32_t at_wifi_commands(void);
++const char *at_wifi_last_command(int i);
+ 
+ #endif // AT_WIFI_H
+diff --git a/src/main.c b/src/main.c
+index 01f47db..7f30b4d 100644
+--- a/src/main.c
++++ b/src/main.c
+@@ -15,6 +15,8 @@
+ #include "../telnetd.h"
+ #include "../xml.h"
+ #include "../at_wifi.h"
++#include "../audio.h"
++#include "../radio.h"
+ 
+ const char *companion_version = "Companion v1.4.33";
+ 
+@@ -137,6 +139,13 @@ int main( void )
+   mcu_hw_init();
+   telnetd_init();
+   
++#ifdef AUDIO_TEST
++  audio_test_init();
++#endif
++#ifdef RADIO_ENABLE
++  radio_init();
++#endif
++
+   // run FPGA com thread
+   xTaskCreate( com_task, "FPGA Com", 4096, NULL, CONFIG_MAX_PRIORITY-1, &com_task_handle );
+ 
+diff --git a/src/mcu_hw.h b/src/mcu_hw.h
+index 0a0737d..33e8ff4 100644
+--- a/src/mcu_hw.h
++++ b/src/mcu_hw.h
+@@ -20,6 +20,7 @@ void mcu_hw_reset(void);
+ // HW SPI interface
+ void mcu_hw_spi_begin(void);
+ unsigned char mcu_hw_spi_tx_u08(unsigned char b);
++void mcu_hw_spi_tx_buffer(const unsigned char *buf, int len);
+ void mcu_hw_spi_end(void);
+ 
+ bool mcu_hw_hid_present(void);
+diff --git a/src/rp2040/CMakeLists.txt b/src/rp2040/CMakeLists.txt
+index af50695..adead69 100644
+--- a/src/rp2040/CMakeLists.txt
++++ b/src/rp2040/CMakeLists.txt
+@@ -73,6 +73,8 @@ add_executable(${PROJECT}
+ 	mcu_hw.c
+ 	bluetooth.c
+ 	../sysctrl.c
++	../audio.c
++	../radio.c
+ 	../hidparser.c
+ 	../hid.c
+ 	../sdc.c
+@@ -100,6 +102,7 @@ target_compile_definitions(${PROJECT} PRIVATE
+         PICO_FLASH_ASSUME_CORE1_SAFE=1
+         PIO_USB_DP_PIN_DEFAULT=2
+         PICO_DEFAULT_PIO_USB_DP_PIN=2
++        RADIO_ENABLE=1
+ 	# CFG_TUSB_DEBUG=2
+ )
+ 
+diff --git a/src/rp2040/FreeRTOSConfig.h b/src/rp2040/FreeRTOSConfig.h
+index 64d3ae6..743d120 100644
+--- a/src/rp2040/FreeRTOSConfig.h
++++ b/src/rp2040/FreeRTOSConfig.h
+@@ -91,12 +91,12 @@
+ #ifdef ENABLE_BLUETOOTH
+ // reserve a little more ram outside freertos for bluetooth
+ #if PICO_RP2350
+-#define configTOTAL_HEAP_SIZE                   (112*1024)
++#define configTOTAL_HEAP_SIZE                   (160*1024)
+ #else
+ #define configTOTAL_HEAP_SIZE                   (106*1024)
+ #endif
+ #else
+-#define configTOTAL_HEAP_SIZE                   (112*1024)
++#define configTOTAL_HEAP_SIZE                   (160*1024)
+ #endif
+ #define configAPPLICATION_ALLOCATED_HEAP        0
+ 
+@@ -144,7 +144,7 @@ to exclude the API function. */
+ #define INCLUDE_vTaskDelete                     1
+ #define INCLUDE_vTaskSuspend                    1
+ #define INCLUDE_xResumeFromISR                  0
+-#define INCLUDE_vTaskDelayUntil                 0
++#define INCLUDE_vTaskDelayUntil                 1
+ #define INCLUDE_vTaskDelay                      1
+ #define INCLUDE_xTaskGetSchedulerState          0
+ #define INCLUDE_xTaskGetCurrentTaskHandle       1
+diff --git a/src/rp2040/mcu_hw.c b/src/rp2040/mcu_hw.c
+index 1d33163..5db091d 100644
+--- a/src/rp2040/mcu_hw.c
++++ b/src/rp2040/mcu_hw.c
+@@ -639,6 +639,10 @@ void mcu_hw_spi_end() {
+   xSemaphoreGive(sem);
+ }
+ 
++void mcu_hw_spi_tx_buffer(const unsigned char *buf, int len) {
++  spi_write_blocking(SPI_BUS, buf, len);   // bulk transfer, received bytes are discarded
++}
++
+ unsigned char mcu_hw_spi_tx_u08(unsigned char b) {
+   unsigned char retval;  spi_write_read_blocking(SPI_BUS, &b, &retval, 1);
+   return retval;
+diff --git a/src/sysctrl.c b/src/sysctrl.c
+index 4c544fe..8b380de 100644
+--- a/src/sysctrl.c
++++ b/src/sysctrl.c
+@@ -103,6 +103,38 @@ unsigned char sys_irq_ctrl(unsigned char ack) {
+   return ret;
+ }
+ 
++/* ---- audio samples for the internet radio (command 11) ---- */
++#define SPI_SYS_AUDIO        11
++#define SPI_SYS_AUDIO_STATUS  0
++#define SPI_SYS_AUDIO_PUT     1
++
++uint16_t sys_audio_space(void) {
++  sys_begin(SPI_SYS_AUDIO);
++  mcu_hw_spi_tx_u08(SPI_SYS_AUDIO_STATUS);
++  uint8_t hi = mcu_hw_spi_tx_u08(0);
++  uint8_t lo = mcu_hw_spi_tx_u08(0);
++  mcu_hw_spi_end();
++  return ((hi & 0x0f) << 8) | lo;
++}
++
++// send frames of left/right 16 bit samples, big endian (left hi/lo, right hi/lo)
++void sys_audio_write(const int16_t *lr, int frames) {
++  uint8_t buf[512];
++  while(frames > 0) {
++    int n = (frames > 128) ? 128 : frames;
++    for(int i=0;i<2*n;i++) {
++      buf[2*i]   = ((uint16_t)lr[i]) >> 8;
++      buf[2*i+1] = ((uint16_t)lr[i]) & 0xff;
++    }
++    sys_begin(SPI_SYS_AUDIO);
++    mcu_hw_spi_tx_u08(SPI_SYS_AUDIO_PUT);
++    mcu_hw_spi_tx_buffer(buf, 4*n);
++    mcu_hw_spi_end();
++    lr += 2*n;
++    frames -= n;
++  }
++}
++
+ static void sys_port_begin(unsigned char cmd) {
+   sys_begin(SPI_SYS_PORT);
+   mcu_hw_spi_tx_u08(cmd); 
+@@ -152,6 +184,33 @@ void sys_port_write(unsigned char port, const unsigned char *ptr, int len) {
+   }
+ }
+ 
++// like sys_port_write() but gives up instead of waiting when the core's buffer is full
++// (used for unsolicited messages that must never block when nobody reads the port)
++bool sys_port_write_nb(unsigned char port, const unsigned char *ptr, int len) {
++  if(len <= 0) return true;
++  if(sys_port_tx_free(port) < len) return false;
++  sys_port_begin(SPI_SYS_PORT_PUT);
++  mcu_hw_spi_tx_u08(port);
++  for(int i=0;i<len;i++)
++    mcu_hw_spi_tx_u08(ptr[i]);
++  mcu_hw_spi_end();
++  return true;
++}
++
++// writes as many bytes as currently fit into the core's (small, 15 byte) fifo and returns that number
++int sys_port_write_part(unsigned char port, const unsigned char *ptr, int len) {
++  if(len <= 0) return 0;
++  int room = sys_port_tx_free(port);
++  if(room <= 0) return 0;
++  if(room > len) room = len;
++  sys_port_begin(SPI_SYS_PORT_PUT);
++  mcu_hw_spi_tx_u08(port);
++  for(int i=0;i<room;i++)
++    mcu_hw_spi_tx_u08(ptr[i]);
++  mcu_hw_spi_end();
++  return room;
++}
++
+ bool sys_port_get_status(unsigned char port) {
+   static const char *parity_str[] = { "N", "O", "E", "?" }; 
+   static const char *stop_str[] = { "1", "1.5", "2", "?" }; 
+diff --git a/src/sysctrl.h b/src/sysctrl.h
+index 0aaee0a..14c9c29 100644
+--- a/src/sysctrl.h
++++ b/src/sysctrl.h
+@@ -35,6 +35,12 @@ void sys_run_action_by_name(char *);
+ const char *sys_get_config_name(void);
+ 
+ void sys_port_write(unsigned char, const unsigned char*, int);
++bool sys_port_write_nb(unsigned char, const unsigned char*, int);
++int  sys_port_write_part(unsigned char, const unsigned char*, int);   // writes as much as fits, returns the byte count   // never waits, false if no room
++
++// audio samples for the internet radio (core command 11)
++uint16_t sys_audio_space(void);                         // free entries in the core's audio fifo
++void sys_audio_write(const int16_t *lr, int frames);    // frames of interleaved left/right samples
+ bool sys_port_get_status(unsigned char);
+ 
+ #define SYS_TIME_FLAGS_NTP   (1<<0)

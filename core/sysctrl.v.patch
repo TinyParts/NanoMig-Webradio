@@ -1,0 +1,93 @@
+diff --git a/src/misc/sysctrl.v b/src/misc/sysctrl.v
+index e20706b..e577679 100644
+--- a/src/misc/sysctrl.v
++++ b/src/misc/sysctrl.v
+@@ -45,6 +45,13 @@ module sysctrl #(
+   output reg [11:0] rtc, // toggle bit, 3 bit index, 8 bit data
+ `endif
+ 
++`ifdef ENABLE_PICO_AUDIO
++  // audio samples pushed by the MCU (internet radio): stereo 2 x 16 bit
++  output reg [31:0] audio_wr_data,
++  output reg	    audio_wr_strobe,
++  input [11:0]	    audio_space,   // free entries in the audio fifo
++`endif
++
+   // values that can be configured by the user
+   output	    system_reset,
+   output reg [1:0]  system_floppy_drives,
+@@ -105,6 +112,12 @@ initial $readmemh("amiga_xml.hex", amiga_xml);
+ reg [7:0] rtc_cmd;
+ `endif
+ 
++`ifdef ENABLE_PICO_AUDIO
++reg [7:0]  audio_cmd;
++reg [23:0] audio_sr;
++reg [1:0]  audio_bcnt;
++`endif
++
+ `ifdef ENABLE_AT_MODEM
+ reg       port_out_availableD;
+ reg [7:0] port_cmd;
+@@ -137,6 +150,10 @@ always @(posedge clk) begin
+       port_out_strobe <= 1'b0;
+       port_in_strobe <= 1'b0;
+ `endif
++`ifdef ENABLE_PICO_AUDIO
++      audio_wr_strobe <= 1'b0;
++      audio_bcnt <= 2'd0;
++`endif
+ 
+       // OSD value defaults. These should be sane defaults, but the MCU
+       // will very likely override these early
+@@ -179,6 +196,9 @@ always @(posedge clk) begin
+       end
+ 
+       int_ack <= 8'h00;
++`ifdef ENABLE_PICO_AUDIO
++      audio_wr_strobe <= 1'b0;
++`endif
+ 
+       // iack bit 0 acknowledges the coldboot notification
+       if(int_ack[0]) sys_int <= 1'b0;
+@@ -209,6 +229,9 @@ always @(posedge clk) begin
+             command <= data_in;
+ 	    menu_rom_addr <= 12'h000;
+             data_out <= 8'h00;
++`ifdef ENABLE_PICO_AUDIO
++	    audio_bcnt <= 2'd0;
++`endif
+         end else begin
+             if(state != 4'd15) state <= state + 4'd1;
+ 
+@@ -376,6 +399,30 @@ always @(posedge clk) begin
+             end // if (command == 8'd7)
+ `endif
+ 
++`ifdef ENABLE_PICO_AUDIO
++            // CMD 11: audio samples for the internet radio
++            //   sub command 0: get status, returns the number of free fifo entries
++            //                  (high byte first, one byte delayed like all other reads)
++            //   sub command 1: write samples, 4 bytes per entry (left hi/lo, right hi/lo)
++            if(command == 8'd11) begin
++               if(state == 4'd0) begin
++                  audio_cmd <= data_in;
++                  data_out <= { 4'b0000, audio_space[11:8] };
++               end else begin
++                  if(state == 4'd1) data_out <= audio_space[7:0];
++
++                  if(audio_cmd == 8'd1) begin
++                     audio_sr <= { audio_sr[15:0], data_in };
++                     audio_bcnt <= audio_bcnt + 2'd1;
++                     if(audio_bcnt == 2'd3) begin
++                        audio_wr_data <= { audio_sr[23:0], data_in };
++                        audio_wr_strobe <= 1'b1;
++                     end
++                  end
++               end
++            end
++`endif
++
+             // CMD 8: read (menu) config
+             if(command == 8'd8) begin
+ 	       data_out <= menu_rom_data;

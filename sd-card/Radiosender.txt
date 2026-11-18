@@ -1,0 +1,68 @@
+# Senderliste fuer das Amiga-Radio (Pico)
+#
+# Eine Zeile pro Sender:   Name | http://adresse
+# Das Land steht im Namen (AT - , DE - , CH - ), damit man die Sender in der Liste unterscheiden kann.
+# Leere Zeilen und Zeilen mit # am Anfang werden ignoriert. Umlaute sind erlaubt (Datei als UTF-8 speichern).
+# Nur HTTP-Adressen (kein HTTPS), MP3-Streams. Maximal 64 Sender, Namen bis 39 Zeichen
+# (in der Liste sind 32 Zeichen sichtbar).
+# Die Liste wird gelesen, wenn das Radio-Programm startet (oder mit der Taste R neu geladen).
+# Fehlt diese Datei, verwendet der Pico eine eingebaute Liste.
+
+# --- Österreich ---
+AT - Antenne Kärnten | http://live.antenne.at/ak
+AT - Antenne Steiermark | http://live.antenne.at/as
+AT - Energy Innsbruck | http://stream1.energy.at:8000/ibk
+AT - FM4 | http://orf-live.ors-shoutcast.at/fm4-q2a
+AT - Hitradio Ö3 | http://orf-live.ors-shoutcast.at/oe3-q2a
+AT - Kronehit | http://onair-ha1.krone.at/kronehit1058.mp3
+AT - Life Radio | http://stream1.liferadio.at/
+AT - Ö1 | http://orf-live.ors-shoutcast.at/oe1-q2a
+AT - Radio Arabella | http://frontend.streams.arabella.at/arabella-niederoesterreich/stream/mp3
+AT - Radio Burgenland | http://orf-live.ors-shoutcast.at/bgl-q2a
+AT - Radio Kärnten | http://orf-live.ors-shoutcast.at/ktn-q2a
+AT - Radio Klassik Stephansdom | http://radioklassikstephansdom.ice.infomaniak.ch/radioklassikstephansdom.mp3
+AT - Radio Niederösterreich | http://orf-live.ors-shoutcast.at/noe-q2a
+AT - Radio Oberösterreich | http://orf-live.ors-shoutcast.at/ooe-q2a
+AT - Radio Osttirol | http://streamplus20.leonex.de:28768/;
+AT - Radio Salzburg | http://orf-live.ors-shoutcast.at/sbg-q2a
+AT - Radio Steiermark | http://orf-live.ors-shoutcast.at/stm-q2a
+AT - Radio Tirol | http://orf-live.ors-shoutcast.at/tir-q2a
+AT - Radio Vorarlberg | http://orf-live.ors-shoutcast.at/vbg-q2a
+AT - Radio Wien | http://orf-live.ors-shoutcast.at/wie-q2a
+AT - Rock Antenne Österreich | http://s6-webradio.webradio.de/rockantenne-oesterreich
+
+# --- Deutschland ---
+DE - Antenne Bayern | http://mp3channels.webradio.antenne.de/antenne
+DE - Bayern 3 | http://dispatcher.rndfnk.com/br/br3/live/mp3/mid
+DE - Big FM | http://streams.bigfm.de/bigfm-deutschland-128-mp3
+DE - BR Klassik | http://dispatcher.rndfnk.com/br/brklassik/live/mp3/mid
+DE - Deutschlandfunk | http://st01.dlf.de/dlf/01/128/mp3/stream.mp3
+DE - Deutschlandfunk Kultur | http://st02.dlf.de/dlf/02/128/mp3/stream.mp3
+DE - Deutschlandfunk Nova | http://st03.dlf.de/dlf/03/128/mp3/stream.mp3
+DE - Hit Radio FFH | http://mp3.ffh.de/radioffh/hqlivestream.mp3
+DE - hr3 | http://dispatcher.rndfnk.com/hr/hr3/live/mp3/128/stream.mp3
+DE - MDR Jump | http://mdr-284320-0.sslcast.mdr.de/mdr/284320/0/mp3/high/stream.mp3
+DE - NDR 2 | http://icecast.ndr.de/ndr/ndr2/hamburg/mp3/128/stream.mp3
+DE - Radio Bob | http://streams.radiobob.de/bob-live/mp3-192/streams.radiobob.de/
+DE - Radio Eins | http://dispatcher.rndfnk.com/rbb/radioeins/live/mp3/mid
+DE - Rock Antenne | http://mp3channels.webradio.rockantenne.de/rockantenne
+DE - SWR3 | http://dispatcher.rndfnk.com/swr/swr3/live/mp3/128/stream.mp3
+DE - WDR 2 | http://wdr-wdr2-rheinland.icecast.wdr.de/wdr/wdr2/rheinland/mp3/128/stream.mp3
+DE - WDR 4 | http://wdr-wdr4-live.icecast.wdr.de/wdr/wdr4/live/mp3/128/stream.mp3
+
+# --- Schweiz ---
+CH - Energy Zürich | http://energyzuerich.ice.infomaniak.ch/energyzuerich-high.mp3
+CH - RaBe Bern | http://stream.rabe.ch/livestream/rabe-mid.mp3
+CH - Radio Basilisk | http://radiobasilisk-64.ice.infomaniak.ch/radiobasilisk-64-128-2.mp3
+CH - Radio Swiss Classic | http://stream.srg-ssr.ch/m/rsc_de/mp3_128
+CH - Radio Swiss Jazz | http://stream.srg-ssr.ch/m/rsj/mp3_128
+CH - Radio Swiss Pop | http://stream.srg-ssr.ch/m/rsp/mp3_128
+CH - Radio Tell | http://stream.radiotell.ch/radiotell.mp3
+CH - Radio X Basel | http://mp3.radiox.ch:8000/standard.mp3
+CH - Radio Zürisee | http://mp3.radio.ch/radiozuerisee128k
+CH - SRF 1 | http://stream.srg-ssr.ch/m/drs1/mp3_128
+CH - SRF 2 Kultur | http://stream.srg-ssr.ch/m/drs2/mp3_128
+CH - SRF 3 | http://stream.srg-ssr.ch/m/drs3/mp3_128
+CH - SRF 4 News | http://stream.srg-ssr.ch/m/drs4news/mp3_128
+CH - SRF Musikwelle | http://stream.srg-ssr.ch/m/drsmw/mp3_128
+CH - SRF Virus | http://stream.srg-ssr.ch/m/drsvirus/mp3_128
